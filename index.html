@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LOM — небо</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;600&family=Commissioner:wght@400;500&display=swap">
+<style>
+html,body{margin:0}
+
+/* Layout: one full-screen night sky over a pine ridge; quiet title top-left, single action bottom-centre. Deliberately single dark theme. */
+:root{
+  --night:#02040a; --ink:#eef2f8; --soft:rgba(238,242,248,.62); --edge:rgba(238,242,248,.26);
+  --display:"Unbounded", "Commissioner", system-ui, sans-serif;
+  --body:"Commissioner", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--night);color:var(--ink);font-family:var(--body);overflow:hidden}
+.scene{position:relative;height:100%;width:100%}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.top{position:absolute;top:20px;left:20px;right:20px;pointer-events:none}
+.eyebrow{font-size:14px;letter-spacing:.06em;color:var(--soft);text-shadow:0 1px 10px rgba(0,0,0,.6)}
+h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);margin:6px 0 0;letter-spacing:.01em;text-shadow:0 1px 12px rgba(0,0,0,.6)}
+.bottom{position:absolute;left:16px;right:16px;bottom:max(24px, env(safe-area-inset-bottom, 0px));display:flex;flex-direction:column;align-items:center;gap:10px}
+.cta{font-family:var(--display);font-size:16px;color:var(--ink);text-decoration:none;padding:15px 28px;border:1px solid var(--edge);border-radius:999px;background:rgba(2,4,10,.4);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);transition:border-color .2s}
+.cta:hover{border-color:var(--soft)}
+.hint{font-size:13px;color:var(--soft);text-align:center}
+.stars{position:absolute;right:20px;bottom:max(28px, env(safe-area-inset-bottom, 0px));font-size:14px;letter-spacing:.04em;color:var(--soft);text-shadow:0 1px 10px rgba(0,0,0,.6);font-variant-numeric:tabular-nums;pointer-events:none}
+.stars b{font-family:var(--display);font-weight:400;font-size:18px;color:var(--ink);margin-right:6px}
+@media (max-width:560px){.stars{bottom:auto;top:20px}}
+.cta:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+</style>
+</head>
+<body>
+<div class="scene">
+  <canvas id="sky" role="img" aria-label="Нічне небо над лісом: кожен донат команди LOM — окрема зірка, що більший донат, то більша зірка"></canvas>
+  <div class="top">
+    <div class="eyebrow">LOM — небо</div>
+  </div>
+  <div class="stars" id="stars" aria-live="polite"></div>
+  <div class="bottom">
+    <a class="cta" href="https://send.monobank.ua/jar/7RCpufUM7h" target="_blank" rel="noopener">Запалити зірку</a>
+    <div class="hint">Кожен донат — нова зірка. Що більший донат, то яскравіша зірка</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const sky=document.getElementById('sky');
+  const DEG_PER_SEC=0.11;            // sky turns about the pole (sped up from the real 15°/hour)
+  let W=0,H=0,dpr=1,R=0,poleX=0,poleY=0,horizonY=0;
+  let skyGrad=null,starLayer=null,fg=null,brights=[],ready=false;
+  const BG_STARS=0;
+  // real inflows from the Банка statement of 05.10.2026 (withdrawals left out), oldest first: [date, ₴]
+  const STATEMENT=[["2026-07-12 22:32",100],["2026-07-13 05:09",100],["2026-07-13 09:59",100],["2026-07-13 10:01",100],["2026-07-13 10:03",100],["2026-07-13 10:05",100],["2026-07-13 10:06",100],["2026-07-13 10:07",100],["2026-07-13 11:38",100],["2026-07-13 12:44",100],["2026-07-13 17:41",100],["2026-07-17 09:58",200],["2026-07-20 05:11",100],["2026-07-21 07:43",100],["2026-07-22 08:35",500],["2026-07-22 08:42",200],["2026-07-22 09:03",100],["2026-07-22 09:06",1000],["2026-07-22 09:18",100],["2026-07-22 09:25",100],["2026-07-22 09:50",100],["2026-07-22 10:00",100],["2026-07-22 11:33",100],["2026-07-23 10:44",500],["2026-07-25 10:57",700],["2026-07-27 05:11",100],["2026-07-27 09:26",1900],["2026-07-27 09:37",100],["2026-07-27 09:44",300],["2026-07-27 09:46",200],["2026-07-27 09:51",100],["2026-07-27 12:16",200],["2026-07-27 19:09",100],["2026-07-28 10:03",100],["2026-07-28 14:06",100],["2026-07-31 10:47",100],["2026-08-02 22:44",700],["2026-08-03 05:11",100],["2026-08-03 09:52",200],["2026-08-03 09:53",500],["2026-08-03 10:04",100],["2026-08-03 10:07",1000],["2026-08-03 11:39",100],["2026-08-03 17:17",300],["2026-08-05 09:43",200],["2026-08-05 09:50",300],["2026-08-05 09:52",1000],["2026-08-05 10:03",250],["2026-08-05 10:06",100],["2026-08-05 11:27",200],["2026-08-05 12:00",400],["2026-08-06 09:29",300],["2026-08-07 12:11",450],["2026-08-10 05:12",100],["2026-08-10 09:20",100],["2026-08-10 09:20",500],["2026-08-10 09:22",100],["2026-08-10 09:45",300],["2026-08-10 09:46",100],["2026-08-10 09:58",100],["2026-08-12 14:12",100],["2026-08-17 05:13",100],["2026-08-17 09:00",600],["2026-08-17 09:04",100],["2026-08-17 09:08",100],["2026-08-17 09:27",150],["2026-08-17 09:44",100],["2026-08-17 12:02",100],["2026-08-17 16:09",100],["2026-08-24 21:06",250],["2026-08-25 08:48",100],["2026-08-25 08:52",100],["2026-08-25 09:05",200],["2026-08-25 09:13",100],["2026-08-25 09:21",100],["2026-08-25 09:41",300],["2026-08-25 12:28",100],["2026-08-25 13:51",100],["2026-08-31 05:13",100],["2026-08-31 09:16",100],["2026-08-31 09:17",100],["2026-08-31 09:18",100],["2026-08-31 09:22",100],["2026-08-31 09:43",100],["2026-08-31 17:10",100],["2026-09-07 05:13",100],["2026-09-07 09:53",100],["2026-09-07 09:54",300],["2026-09-07 09:55",100],["2026-09-07 10:01",100],["2026-09-07 10:18",100],["2026-09-07 10:30",100],["2026-09-07 11:02",100],["2026-09-07 11:55",200],["2026-09-07 15:01",100],["2026-09-11 11:06",100],["2026-09-14 05:13",100],["2026-09-14 08:25",600],["2026-09-14 09:06",100],["2026-09-14 09:06",100],["2026-09-14 09:07",100],["2026-09-14 09:13",100],["2026-09-14 09:17",100],["2026-09-14 09:18",100],["2026-09-14 09:20",100],["2026-09-14 09:20",100],["2026-09-14 09:23",200],["2026-09-14 09:36",100],["2026-09-14 09:44",100],["2026-09-14 10:28",200],["2026-09-21 05:11",100],["2026-09-21 09:00",100],["2026-09-21 09:03",200],["2026-09-21 10:50",100],["2026-09-21 12:32",100],["2026-09-22 15:28",100],["2026-09-28 05:11",100],["2026-10-05 05:11",100]];
+  const DONATIONS=STATEMENT.map(x=>x[1]);
+  // every star gets a permanent key, so its place never depends on its position in the list.
+  // In the live version this is the Monobank transaction id; here it is date|amount|n (n separates same-minute twins).
+  const KEYS=(function(){const seen={};return STATEMENT.map(([d,a])=>{const b=d+'|'+a;seen[b]=(seen[b]||0)+1;return b+'|'+seen[b];});})();
+  function seedOf(key){let h=2166136261;for(let i=0;i<key.length;i++){h^=key.charCodeAt(i);h=Math.imul(h,16777619);}return h|0;}
+  // star size: 100 ₴ = smallest, 1000 ₴ and more = largest, logarithmic in between
+  function sizeFor(v){const f=Math.min(1,Math.max(0,Math.log10(v/100)));return 0.7+1.9*f;}
+  let sotky=DONATIONS.length; const sot=[]; const born={}; const meteors=[]; let nextMeteor=0; const t0=performance.now();
+
+  function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+  function gauss(r){let u=0,v=0;while(!u)u=r();while(!v)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(6.2832*v);}
+  function h2(i,j,s){let h=Math.imul(i,374761393)+Math.imul(j,668265263)+Math.imul(s,1442695041);h=Math.imul(h^(h>>>13),1274126177);return((h^(h>>>16))>>>0)/4294967296;}
+  function vn(x,y,s){const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi,u=xf*xf*(3-2*xf),v=yf*yf*(3-2*yf);
+    const a=h2(xi,yi,s),b=h2(xi+1,yi,s),c=h2(xi,yi+1,s),d=h2(xi+1,yi+1,s);return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v;}
+  function fbm(x,y,s){let f=0,a=0.5;for(let o=0;o<5;o++){f+=a*vn(x,y,s+o*31);x*=2.03;y*=2.03;a*=0.5;}return f;}
+  function smooth(e0,e1,x){const t=Math.min(1,Math.max(0,(x-e0)/(e1-e0)));return t*t*(3-2*t);}
+  function starColor(r){const x=r();if(x<0.1)return[165,190,255];if(x<0.42)return[215,226,255];if(x<0.78)return[255,248,236];if(x<0.93)return[255,224,178];return[255,192,145];}
+
+  function build(){
+    poleX=W*0.58;poleY=H*0.28;horizonY=H*0.84;
+    R=Math.ceil(Math.max(Math.hypot(poleX,poleY),Math.hypot(W-poleX,poleY),Math.hypot(poleX,H-poleY),Math.hypot(W-poleX,H-poleY)))+4;
+    const S=2*R;
+
+    // fixed sky gradient with a faint town glow on the far left
+    skyGrad=document.createElement('canvas');skyGrad.width=W;skyGrad.height=H;
+    let c=skyGrad.getContext('2d');let g=c.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#010309');g.addColorStop(0.5,'#040917');g.addColorStop(0.78,'#0a1529');g.addColorStop(0.9,'#13223b');g.addColorStop(1,'#1a2a44');
+    c.fillStyle=g;c.fillRect(0,0,W,H);
+    g=c.createRadialGradient(W*0.08,horizonY,0,W*0.08,horizonY,H*0.55);g.addColorStop(0,'rgba(120,92,64,0.16)');g.addColorStop(1,'rgba(120,92,64,0)');
+    c.fillStyle=g;c.fillRect(0,0,W,H);
+
+    // rotating layer: Milky Way + star field, centred on the pole
+    starLayer=document.createElement('canvas');starLayer.width=S;starLayer.height=S;c=starLayer.getContext('2d');
+    const bAng=1.05,ux=Math.cos(bAng),uy=Math.sin(bAng),nx=-uy,ny=ux,bx=-H*0.12*nx,by=-H*0.12*ny;
+    const aCore=R*0.55,wBase=H*0.15;
+    const Q=4,L=Math.ceil(S/Q),low=document.createElement('canvas');low.width=L;low.height=L;
+    const lc=low.getContext('2d'),img=lc.createImageData(L,L),px=img.data;
+    for(let j=0;j<L;j++){for(let i=0;i<L;i++){
+      const X=i*Q-R,Y=j*Q-R,a=(X-bx)*ux+(Y-by)*uy,d=(X-bx)*nx+(Y-by)*ny;
+      const w=wBase*(0.8+0.45*fbm(a*0.0018,7.7,3));
+      const across=Math.exp(-(d*d)/(w*w));if(across<0.004)continue;
+      const clump=fbm(X*0.0055,Y*0.0055,11);
+      let dens=across*(0.35+1.1*clump*clump);
+      const lane=smooth(0.5,0.66,fbm(X*0.009+40,Y*0.009,23))*Math.exp(-(d*d)/(w*w*0.18));
+      dens*=1-0.88*lane;
+      const core=Math.exp(-((a-aCore)*(a-aCore))/(R*R*0.12))*Math.exp(-(d*d)/(w*w*1.4))*(1-0.8*lane);
+      const I=Math.min(1,dens*0.2+core*0.26);
+      const k=(j*L+i)*4,m=Math.min(1,core*1.6);
+      px[k]=170+85*m;px[k+1]=188+28*m;px[k+2]=228-60*m;px[k+3]=I*255;
+    }}
+    lc.putImageData(img,0,0);
+    c.imageSmoothingEnabled=true;c.imageSmoothingQuality='high';c.drawImage(low,0,0,S,S);
+    c.globalCompositeOperation='lighter';
+    const r=rng(424242),area=S*S/1e6;
+    function dot(x,y,rad,a,col){c.fillStyle='rgba('+col[0]+','+col[1]+','+col[2]+','+a.toFixed(3)+')';c.beginPath();c.arc(x,y,rad,0,6.2832);c.fill();}
+    for(let n=Math.round(5200*area*BG_STARS),i=0;i<n;i++){ // dense faint stars inside the band
+      const a=(r()-0.5)*S*1.4,d=gauss(r)*wBase*0.62,x=R+bx+ux*a+nx*d,y=R+by+uy*a+ny*d;
+      if(x<0||y<0||x>S||y>S)continue;dot(x,y,0.22+r()*0.38,0.12+r()*0.42,starColor(r));
+    }
+    for(let n=Math.round(1700*area*BG_STARS),i=0;i<n;i++){ // whole-sky field, power-law brightness
+      const m=Math.pow(r(),6);dot(r()*S,r()*S,0.28+m*1.1,0.16+0.55*Math.pow(r(),0.7)+m*0.25,starColor(r));
+    }
+    // brighter background stars drawn live so they can scintillate
+    brights=[];for(let n=Math.round(14*area*BG_STARS),i=0;i<n;i++){const col=starColor(r);brights.push({x:r()*S-R,y:r()*S-R,s:0.7+Math.pow(r(),3)*1.1,col,ph:r()*6.28,sp:1.5+r()*3});}
+
+    // fixed foreground: haze, airglow, pine ridge
+    fg=document.createElement('canvas');fg.width=W;fg.height=H;c=fg.getContext('2d');
+    g=c.createLinearGradient(0,horizonY-H*0.3,0,horizonY);g.addColorStop(0,'rgba(14,26,46,0)');g.addColorStop(1,'rgba(18,32,56,0.62)');
+    c.fillStyle=g;c.fillRect(0,horizonY-H*0.3,W,H*0.3);
+    g=c.createLinearGradient(0,horizonY-H*0.2,0,horizonY);g.addColorStop(0,'rgba(140,60,70,0)');g.addColorStop(0.45,'rgba(140,60,70,0.03)');g.addColorStop(0.75,'rgba(70,140,95,0.06)');g.addColorStop(1,'rgba(70,140,95,0.02)');
+    c.fillStyle=g;c.fillRect(0,horizonY-H*0.2,W,H*0.2);
+    const rr=rng(77),ph=[rr()*6,rr()*6,rr()*6],ridge=x=>{const k=x/W;return horizonY+H*0.028*Math.sin(k*2.7+ph[0])+H*0.016*Math.sin(k*6.9+ph[1])+H*0.006*Math.sin(k*15+ph[2]);};
+    c.fillStyle='#010205';c.beginPath();c.moveTo(0,H);for(let x=0;x<=W+6;x+=6)c.lineTo(x,ridge(x));c.lineTo(W,H);c.closePath();c.fill();
+    const sc=Math.max(0.6,H/900);
+    for(let x=-10;x<W+10;){ // pines along the ridge, in clumps
+      const dense=vn(x*0.012,0.5,91);const step=(dense>0.45?5:16)+rr()*10;
+      if(dense>0.3){const h=(16+rr()*38)*sc*(0.6+dense),y=ridge(x)+2,wv=h*0.32;
+        c.beginPath();c.moveTo(x,y-h);
+        for(let t=1;t<=5;t++){const yy=y-h+h*t/5,ww=wv*t/5;c.lineTo(x+ww*(1.1+rr()*0.3),yy);c.lineTo(x+ww*0.45,yy);}
+        c.lineTo(x+wv*0.12,y+4);c.lineTo(x-wv*0.12,y+4);
+        for(let t=5;t>=1;t--){const yy=y-h+h*t/5,ww=wv*t/5;c.lineTo(x-ww*0.45,yy);c.lineTo(x-ww*(1.1+rr()*0.3),yy-(t===1?0:0));}
+        c.closePath();c.fill();}
+      x+=step;
+    }
+    ready=true;
+  }
+
+  // сотка stars live on the sky (polar around the pole) and never set below the trees
+  function sotStar(i){
+    while(sot.length<=i){const k=sot.length,r=rng(seedOf(KEYS[k]));const maxR=(horizonY-poleY)*0.9;
+      sot.push({rho:H*0.06+Math.sqrt(r())*(maxR-H*0.06),th:r()*6.2832,ph:r()*6.28,sp:1.2+r()*2.4,s:sizeFor(DONATIONS[k])*(0.94+r()*0.12),col:r()<0.3?[255,232,198]:(r()<0.3?[200,220,255]:[240,245,255])});}
+    return sot[i];
+  }
+  function angle(now){return reduce?0:-(now-t0)/1000*DEG_PER_SEC*Math.PI/180;}
+  function toScreen(x,y,ang){const c=Math.cos(ang),s=Math.sin(ang);return[poleX+x*c-y*s,poleY+x*s+y*c];}
+  function sotPos(i,ang){const p=sotStar(i);return toScreen(Math.cos(p.th)*p.rho,Math.sin(p.th)*p.rho,ang);}
+
+  function psf(c,x,y,s,a,col){
+    const rad=s<=1?7*s:7+3.2*(s-1),g=c.createRadialGradient(x,y,0,x,y,rad),rgb=col[0]+','+col[1]+','+col[2];
+    g.addColorStop(0,'rgba('+rgb+','+(0.85*a)+')');g.addColorStop(0.15,'rgba('+rgb+','+(0.32*a)+')');g.addColorStop(0.45,'rgba('+rgb+','+(0.07*a)+')');g.addColorStop(1,'rgba('+rgb+',0)');
+    c.fillStyle=g;c.fillRect(x-rad,y-rad,rad*2,rad*2);
+    c.fillStyle='rgba(255,255,255,'+a+')';c.beginPath();c.arc(x,y,1.05*s,0,6.2832);c.fill();
+  }
+  function heightDim(y){return 1-0.55*smooth(horizonY-H*0.35,horizonY,y);} // extinction near the horizon
+  function twinkle(p,t,y){const near=smooth(horizonY-H*0.45,horizonY,y);return 1-(0.12+0.35*near)*(0.5+0.5*Math.sin(t*p.sp+p.ph))*(0.6+0.4*Math.sin(t*p.sp*2.7+p.ph*1.3));}
+
+  function spawnMeteor(now,target){
+    const r=Math.random;
+    if(target!==undefined){const ang=-2.35+(r()-0.5)*0.5,len=H*(0.35+r()*0.15);meteors.push({target,start:now,dur:1000,ang,len});return;}
+    const x=W*(0.1+r()*0.8),y=H*(0.05+r()*0.4),ang=0.5+r()*1.2+(r()<0.5?0:Math.PI*0.6);
+    meteors.push({x,y,ang,dist:H*(0.18+r()*0.25),start:now,dur:600+r()*600,tail:70+r()*120});
+  }
+
+  function frame(now){
+    if(!ready)return;
+    const c=sky.getContext('2d'),t=(now-t0)/1000,ang=angle(now);
+    c.setTransform(dpr,0,0,dpr,0,0);c.globalCompositeOperation='source-over';
+    c.drawImage(skyGrad,0,0,W,H);
+    c.globalCompositeOperation='lighter';
+    c.save();c.translate(poleX,poleY);c.rotate(ang);c.drawImage(starLayer,-R,-R);c.restore();
+    const ca=Math.cos(ang),sa=Math.sin(ang);
+    for(const b of brights){const x=poleX+b.x*ca-b.y*sa,y=poleY+b.x*sa+b.y*ca;if(x<-10||x>W+10||y<-10||y>horizonY+20)continue;
+      psf(c,x,y,b.s,(reduce?0.8:0.8*twinkle(b,t,y))*heightDim(y),b.col);}
+    for(let i=0;i<sotky;i++){
+      const p=sotStar(i),[x,y]=sotPos(i,ang);let a=reduce?0.95:twinkle(p,t,y),s=p.s;
+      if(born[i]!==undefined){const b=born[i];if(b===null)continue;const k=(now-b)/1600;if(k<0)continue;if(k<1){a=Math.min(1,k*4);s*=1+2.6*Math.pow(1-k,2.2);}else delete born[i];}
+      const aa=a*heightDim(y);psf(c,x,y,s,aa,p.col);
+      if(s>2){const L=(7+3.2*(s-1))*1.15;c.strokeStyle='rgba(255,255,255,'+(0.1*aa)+')';c.lineWidth=0.6;c.beginPath();c.moveTo(x-L,y);c.lineTo(x+L,y);c.moveTo(x,y-L);c.lineTo(x,y+L);c.stroke();}
+    }
+    for(let m=meteors.length-1;m>=0;m--){
+      const o=meteors[m],k=(now-o.start)/o.dur;if(k>=1){if(o.target!==undefined)born[o.target]=now;meteors.splice(m,1);continue;}
+      let hx,hy,tx,ty,alpha;
+      if(o.target!==undefined){const [ex,ey]=sotPos(o.target,ang),e=k*k*(3-2*k);const sx=ex-Math.cos(o.ang)*o.len,sy=ey-Math.sin(o.ang)*o.len;
+        hx=sx+(ex-sx)*e;hy=sy+(ey-sy)*e;const tl=o.len*0.38*(1-k*0.5);tx=hx-Math.cos(o.ang)*tl;ty=hy-Math.sin(o.ang)*tl;alpha=0.9;}
+      else{const e=k;hx=o.x+Math.cos(o.ang)*o.dist*e;hy=o.y+Math.sin(o.ang)*o.dist*e;const tl=o.tail*Math.min(1,k*3);tx=hx-Math.cos(o.ang)*tl;ty=hy-Math.sin(o.ang)*tl;alpha=Math.sin(Math.PI*k);}
+      const g=c.createLinearGradient(hx,hy,tx,ty);g.addColorStop(0,'rgba(255,255,255,'+alpha+')');g.addColorStop(0.3,'rgba(200,220,255,'+(alpha*0.35)+')');g.addColorStop(1,'rgba(200,220,255,0)');
+      c.strokeStyle=g;c.lineWidth=1.6;c.lineCap='round';c.beginPath();c.moveTo(hx,hy);c.lineTo(tx,ty);c.stroke();
+      psf(c,hx,hy,0.6,alpha,[235,242,255]);
+    }
+    c.globalCompositeOperation='source-over';
+    c.drawImage(fg,0,0,W,H);
+  }
+  function loop(now){
+    if(!document.hidden){if(!reduce&&now>nextMeteor){if(nextMeteor)spawnMeteor(now);nextMeteor=now+6000+Math.random()*12000;}frame(now);}
+    requestAnimationFrame(loop);
+  }
+
+  function resize(){
+    dpr=Math.min(2,window.devicePixelRatio||1);W=sky.clientWidth;H=sky.clientHeight;if(!W||!H)return;
+    sky.width=Math.round(W*dpr);sky.height=Math.round(H*dpr);sot.length=0;build();frame(performance.now());
+  }
+  let rt;new ResizeObserver(()=>{clearTimeout(rt);rt=setTimeout(resize,120);}).observe(sky);
+  function addDonation(v){
+    DONATIONS.push(v);KEYS.push('new|'+v+'|'+KEYS.length);const i=sotky++;showCount();const now=performance.now();
+    if(reduce){born[i]=now;frame(now);return;}
+    born[i]=null;spawnMeteor(now,i);
+  }
+  // addDonation(amount) is ready for live updates from the Worker
+  function plz(n){const a=n%10,b=n%100;if(a===1&&b!==11)return 'зірка';if(a>=2&&a<=4&&(b<12||b>14))return 'зірки';return 'зірок';}
+  function showCount(){document.getElementById('stars').innerHTML='<b>'+sotky+'</b>'+plz(sotky);}
+  showCount();
+  resize();
+  if(reduce){addEventListener('resize',()=>frame(performance.now()));}
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
