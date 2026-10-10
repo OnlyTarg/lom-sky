@@ -71,12 +71,15 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
   // після натискання «Запалити зірку» сторінка кілька хвилин чекає на донат і питає Worker частіше
   const WAIT_MS=5*60000, WAIT_POLL_MS=5000;
   let waitFrom=0;
-  // зірки приходять з Worker-а: [ключ, сума, час у Unix-секундах]. Ключ постійний, тож місце зірки на небі не змінюється
-  const DONATIONS=[]; const KEYS=[]; const TIMES=[]; const known=new Set();
+  // зірки приходять з Worker-а: [ключ, сума, час у Unix-секундах, підпис?]. Ключ постійний, тож місце зірки на небі не змінюється.
+  // Підпис є лише в зірок людей, які самі написали в коментарі «★ Ім'я»; анонімні зірки між собою ніяк не пов'язані
+  const DONATIONS=[]; const KEYS=[]; const TIMES=[]; const SIGS=[]; const known=new Set(); const idx=new Map();
   function seedOf(key){let h=2166136261;for(let i=0;i<key.length;i++){h^=key.charCodeAt(i);h=Math.imul(h,16777619);}return h|0;}
   // star size: 100 ₴ = smallest, 1000 ₴ and more = largest, logarithmic in between
   function sizeFor(v){const f=Math.min(1,Math.max(0,Math.log10(v/100)));return 0.7+1.9*f;}
   let sotky=0; const sot=[]; const born={}; const meteors=[]; const labels=[]; const t0=performance.now();
+  // підсвічування: наведення (чи дотик) на підписану зірку запалює всі зірки цієї людини, на анонімну — лише її саму
+  const hl={i:-1,f:0}; let ptr=null,tap=-1,tapAt=0,lastNow=0,cursorOn=false;
   const LABEL_MS=5000; // скільки висить підпис «+100 ₴» біля нової зірки
 
   function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
@@ -170,9 +173,22 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
     meteors.push({x,y,ang,dist:H*(0.18+r()*0.25),start:now,dur:600+r()*600,tail:70+r()*120});
   }
 
+  function starAt(px,py,sh,r){
+    let best=-1,bd=r*r;
+    for(let i=0;i<sotky;i++){if(born[i]===null)continue;const [x,y]=sotPos(i,sh),d=(x-px)*(x-px)+(y-py)*(y-py);if(d<bd){bd=d;best=i;}}
+    return best;
+  }
   function frame(now){
     if(!ready)return;
     const c=sky.getContext('2d'),t=(now-t0)/1000,sh=shiftAt(now),off=sh*P-M;
+    const dt=Math.min(100,now-(lastNow||now));lastNow=now;
+    if(tap>=0&&now-tapAt>4000)tap=-1;
+    const target=ptr?starAt(ptr.x,ptr.y,sh,22):tap;
+    if(target>=0)hl.i=target;
+    hl.f+=((target>=0?1:0)-hl.f)*Math.min(1,dt/(target>=0?120:350));
+    if(hl.f<0.01&&target<0)hl.i=-1;
+    const on=target>=0;if(on!==cursorOn){cursorOn=on;sky.style.cursor=on?'pointer':'';}
+    const hlName=hl.i>=0?SIGS[hl.i]:null;
     c.setTransform(dpr,0,0,dpr,0,0);c.globalCompositeOperation='source-over';
     c.drawImage(skyGrad,0,0,W,H);
     c.globalCompositeOperation='lighter';
@@ -180,7 +196,14 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
     for(let i=0;i<sotky;i++){
       const p=sotStar(i),[x,y]=sotPos(i,sh);if(x<-30||x>W+30)continue;let a=reduce?0.95:twinkle(p,t,y),s=p.s;
       if(born[i]!==undefined){const b=born[i];if(b===null)continue;const k=(now-b)/1600;if(k<0)continue;if(k<1){a=Math.min(1,k*4);s*=1+2.6*Math.pow(1-k,2.2);}else delete born[i];}
-      const aa=a*heightDim(y);psf(c,x,y,s,aa,p.col);
+      let aa=a*heightDim(y);
+      if(hl.f>0){
+        if(i===hl.i||(hlName&&SIGS[i]===hlName)){psf(c,x,y,s,aa,p.col);const pu=reduce?1:0.85+0.15*Math.sin(t*3+i),R=14+6*s;const g=c.createRadialGradient(x,y,0,x,y,R);g.addColorStop(0,'rgba(255,222,160,'+(0.5*hl.f*pu)+')');g.addColorStop(0.35,'rgba(255,214,150,'+(0.16*hl.f*pu)+')');g.addColorStop(1,'rgba(255,214,150,0)');c.fillStyle=g;c.fillRect(x-R,y-R,R*2,R*2);psf(c,x,y,s*1.3,hl.f,[255,236,200]);
+          if(s>2){const L=(7+3.2*(s-1))*1.15;c.strokeStyle='rgba(255,255,255,'+(0.1*aa)+')';c.lineWidth=0.6;c.beginPath();c.moveTo(x-L,y);c.lineTo(x+L,y);c.moveTo(x,y-L);c.lineTo(x,y+L);c.stroke();}
+          continue;}
+        aa*=1-0.5*hl.f;
+      }
+      psf(c,x,y,s,aa,p.col);
       if(s>2){const L=(7+3.2*(s-1))*1.15;c.strokeStyle='rgba(255,255,255,'+(0.1*aa)+')';c.lineWidth=0.6;c.beginPath();c.moveTo(x-L,y);c.lineTo(x+L,y);c.moveTo(x,y-L);c.lineTo(x,y+L);c.stroke();}
     }
     for(let m=meteors.length-1;m>=0;m--){
@@ -203,11 +226,16 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
     for(let n=labels.length-1;n>=0;n--){
       const l=labels[n],k=(now-l.start)/LABEL_MS;if(k<0)continue;if(k>=1){labels.splice(n,1);continue;}
       const [sx,sy]=sotPos(l.i,sh);const a=Math.min(1,k/0.08)*(k>0.7?1-(k-0.7)/0.3:1);
-      const txt='+'+DONATIONS[l.i].toLocaleString('uk-UA')+' ₴';
-      c.font='500 15px "Commissioner", system-ui, sans-serif';const tw=c.measureText(txt).width;
-      let tx=sx+14,ty=sy-12-(reduce?0:22*k);if(tx+tw>W-12)tx=sx-14-tw;if(ty<20)ty=sy+24;
-      c.save();c.globalAlpha=a;c.shadowColor='rgba(0,0,0,0.7)';c.shadowBlur=8;c.fillStyle='rgba(255,244,222,0.95)';c.fillText(txt,tx,ty);c.restore();
+      const txt='+'+DONATIONS[l.i].toLocaleString('uk-UA')+' ₴'+(SIGS[l.i]?' · '+SIGS[l.i]:'');
+      label(c,txt,sx,sy-(reduce?0:22*k),a);
     }
+    // підпис біля зірки під курсором: ім'я, а в анонімної — сума
+    if(hl.i>=0&&hl.f>0.01){const [sx,sy]=sotPos(hl.i,sh);label(c,hlName||'+'+DONATIONS[hl.i].toLocaleString('uk-UA')+' ₴',sx,sy,hl.f);}
+  }
+  function label(c,txt,sx,sy,a){
+    c.font='500 15px "Commissioner", system-ui, sans-serif';const tw=c.measureText(txt).width;
+    let tx=sx+14,ty=sy-12;if(tx+tw>W-12)tx=sx-14-tw;if(ty<20)ty=sy+24;
+    c.save();c.globalAlpha=a;c.shadowColor='rgba(0,0,0,0.7)';c.shadowBlur=8;c.fillStyle='rgba(255,244,222,0.95)';c.fillText(txt,tx,ty);c.restore();
   }
   function loop(now){
     if(!document.hidden)frame(now);
@@ -219,8 +247,12 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
     sky.width=Math.round(W*dpr);sky.height=Math.round(H*dpr);sot.length=0;build();frame(performance.now());
   }
   let rt;new ResizeObserver(()=>{clearTimeout(rt);rt=setTimeout(resize,120);}).observe(sky);
-  function addDonation(v,key,time,animate,delay){
-    DONATIONS.push(v);KEYS.push(key);TIMES.push(time||0);known.add(key);const i=sotky++;
+  // миша: підсвічуємо, поки курсор над зіркою; дотик: підсвічуємо на 4 с або до наступного дотику
+  sky.addEventListener('pointermove',e=>{if(e.pointerType==='mouse')ptr={x:e.clientX,y:e.clientY};});
+  sky.addEventListener('pointerleave',()=>{ptr=null;});
+  sky.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')return;tap=starAt(e.clientX,e.clientY,shiftAt(performance.now()),30);tapAt=performance.now();});
+  function addDonation(v,key,time,animate,delay,sig){
+    DONATIONS.push(v);KEYS.push(key);TIMES.push(time||0);SIGS.push(sig||null);known.add(key);const i=sotky++;idx.set(key,i);
     if(!animate)return;
     if(waitFrom&&(time||0)*1000>=waitFrom-60000)endWait(); // схоже, це та сама зірка, на яку чекали
     const now=performance.now()+(delay||0);
@@ -247,14 +279,15 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
       const r=await fetch(API+(waiting()?'?fresh=1':''),{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);
       const data=await r.json();let j=0;
       // після перезавантаження вкладки під час очікування свіжі зірки теж прилітають метеором
-      for(const [k,a,t] of data.stars||[]){if(known.has(k))continue;addDonation(a,k,t,loaded||(waitFrom&&t*1000>=waitFrom-60000),(j++)*900);}
+      // підпис може з'явитися й у старої зірки: людина щойно вперше написала «★ Ім'я»
+      for(const [k,a,t,n] of data.stars||[]){if(known.has(k)){SIGS[idx.get(k)]=n||null;continue;}addDonation(a,k,t,loaded||(waitFrom&&t*1000>=waitFrom-60000),(j++)*900,n);}
       loaded=true;showCount();
     }catch(e){if(!loaded)document.getElementById('stars').textContent='небо поки недоступне';}
     finally{busy=false;}
   }
   poll();
-  // тест: відкрийте сторінку з ?test в адресі й викличте в консолі testStar(500)
-  if(/[?&]test\b/.test(location.search))window.testStar=(amount)=>{addDonation(Number(amount)||100,'test-'+Date.now()+'-'+Math.random(),Math.floor(Date.now()/1000),true);showCount();};
+  // тест: відкрийте сторінку з ?test в адресі й викличте в консолі testStar(500) або testStar(500, 'Паша')
+  if(/[?&]test\b/.test(location.search))window.testStar=(amount,name)=>{addDonation(Number(amount)||100,'test-'+Date.now()+'-'+Math.random(),Math.floor(Date.now()/1000),true,0,name);showCount();};
   setInterval(()=>{if(!document.hidden&&(waiting()?true:Date.now()-lastPoll>=POLL_MS))poll();},WAIT_POLL_MS);
   // людина повернулась із Monobank: одразу перевіряємо, чи не прилетіла її зірка
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
