@@ -231,11 +231,11 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
   function showCount(){document.getElementById('stars').innerHTML='<b>'+sotky+'</b>'+plz(sotky);}
   const cta=document.querySelector('.cta'),CTA=cta.textContent;
   function showWait(){cta.textContent=waitFrom?'Чекаємо на вашу зірку…':CTA;cta.classList.toggle('wait',!!waitFrom);}
-  // момент натискання зберігаємо в localStorage: на телефоні браузер може перезавантажити вкладку, поки людина в Monobank
-  function startWait(){waitFrom=Date.now();try{localStorage.setItem('lom-wait',String(waitFrom));}catch(e){}showWait();}
-  function endWait(){waitFrom=0;try{localStorage.removeItem('lom-wait');}catch(e){}showWait();}
+  // момент натискання зберігаємо в sessionStorage, тобто лише в цій вкладці: переживе перезавантаження на телефоні, але новий захід на сайт починається зі звичайної кнопки
+  function startWait(){waitFrom=Date.now();try{sessionStorage.setItem('lom-wait',String(waitFrom));}catch(e){}showWait();}
+  function endWait(){waitFrom=0;try{sessionStorage.removeItem('lom-wait');}catch(e){}showWait();}
   function waiting(){if(waitFrom&&Date.now()-waitFrom>WAIT_MS)endWait();return !!waitFrom;}
-  try{const v=+localStorage.getItem('lom-wait');if(v&&Date.now()-v<WAIT_MS)waitFrom=v;}catch(e){}
+  try{const v=+sessionStorage.getItem('lom-wait');if(v&&Date.now()-v<WAIT_MS)waitFrom=v;}catch(e){}
   showWait();
   cta.addEventListener('click',startWait);
 
