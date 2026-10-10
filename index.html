@@ -28,10 +28,16 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
 .cta{font-family:var(--display);font-size:16px;color:var(--ink);text-decoration:none;padding:15px 28px;border:1px solid var(--edge);border-radius:999px;background:rgba(2,4,10,.4);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);transition:border-color .2s}
 .cta:hover{border-color:var(--soft)}
 .hint{font-size:13px;color:var(--soft);text-align:center}
-/* поки чекаємо на зірку після донату: підпис світліший і ледь «дихає» */
-.hint.wait{color:var(--ink);animation:breathe 2.4s ease-in-out infinite}
-@keyframes breathe{50%{opacity:.45}}
-@media (prefers-reduced-motion:reduce){.hint.wait{animation:none}}
+/* поки чекаємо на зірку після донату: кнопка тепло світиться, а по рамці біжить вогник */
+.cta{position:relative}
+.cta.wait{border-color:rgba(255,226,180,.32);box-shadow:0 0 26px rgba(255,214,160,.16)}
+.cta.wait::before{content:"";position:absolute;inset:-1px;border-radius:inherit;padding:1.5px;pointer-events:none;
+  background:conic-gradient(from var(--orbit),transparent 0 62%,rgba(255,226,180,.25) 78%,rgba(255,240,214,1) 92%,transparent 100%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;
+  animation:orbit 2.6s linear infinite}
+@property --orbit{syntax:'<angle>';inherits:false;initial-value:0deg}
+@keyframes orbit{to{--orbit:360deg}}
+@media (prefers-reduced-motion:reduce){.cta.wait::before{animation:none;background:rgba(255,226,180,.6)}}
 .stars{position:absolute;right:20px;bottom:max(28px, env(safe-area-inset-bottom, 0px));font-size:14px;letter-spacing:.04em;color:var(--soft);text-shadow:0 1px 10px rgba(0,0,0,.6);font-variant-numeric:tabular-nums;pointer-events:none}
 .stars b{font-family:var(--display);font-weight:400;font-size:18px;color:var(--ink);margin-right:6px}
 @media (max-width:560px){.stars{bottom:auto;top:20px}}
@@ -223,15 +229,15 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
   }
   function plz(n){const a=n%10,b=n%100;if(a===1&&b!==11)return 'зірка';if(a>=2&&a<=4&&(b<12||b>14))return 'зірки';return 'зірок';}
   function showCount(){document.getElementById('stars').innerHTML='<b>'+sotky+'</b>'+plz(sotky);}
-  const hint=document.querySelector('.hint'),HINT=hint.textContent;
-  function showWait(){hint.textContent=waitFrom?'Чекаємо на вашу зірку…':HINT;hint.classList.toggle('wait',!!waitFrom);}
+  const cta=document.querySelector('.cta'),CTA=cta.textContent;
+  function showWait(){cta.textContent=waitFrom?'Чекаємо на вашу зірку…':CTA;cta.classList.toggle('wait',!!waitFrom);}
   // момент натискання зберігаємо в localStorage: на телефоні браузер може перезавантажити вкладку, поки людина в Monobank
   function startWait(){waitFrom=Date.now();try{localStorage.setItem('lom-wait',String(waitFrom));}catch(e){}showWait();}
   function endWait(){waitFrom=0;try{localStorage.removeItem('lom-wait');}catch(e){}showWait();}
   function waiting(){if(waitFrom&&Date.now()-waitFrom>WAIT_MS)endWait();return !!waitFrom;}
   try{const v=+localStorage.getItem('lom-wait');if(v&&Date.now()-v<WAIT_MS)waitFrom=v;}catch(e){}
   showWait();
-  document.querySelector('.cta').addEventListener('click',startWait);
+  cta.addEventListener('click',startWait);
 
   let loaded=false,busy=false,lastPoll=0;
   async function poll(){
