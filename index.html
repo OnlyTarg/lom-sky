@@ -28,6 +28,10 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
 .cta{font-family:var(--display);font-size:16px;color:var(--ink);text-decoration:none;padding:15px 28px;border:1px solid var(--edge);border-radius:999px;background:rgba(2,4,10,.4);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);transition:border-color .2s}
 .cta:hover{border-color:var(--soft)}
 .hint{font-size:13px;color:var(--soft);text-align:center}
+/* поки чекаємо на зірку після донату: підпис світліший і ледь «дихає» */
+.hint.wait{color:var(--ink);animation:breathe 2.4s ease-in-out infinite}
+@keyframes breathe{50%{opacity:.45}}
+@media (prefers-reduced-motion:reduce){.hint.wait{animation:none}}
 .stars{position:absolute;right:20px;bottom:max(28px, env(safe-area-inset-bottom, 0px));font-size:14px;letter-spacing:.04em;color:var(--soft);text-shadow:0 1px 10px rgba(0,0,0,.6);font-variant-numeric:tabular-nums;pointer-events:none}
 .stars b{font-family:var(--display);font-weight:400;font-size:18px;color:var(--ink);margin-right:6px}
 @media (max-width:560px){.stars{bottom:auto;top:20px}}
@@ -58,6 +62,9 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
   // Адреса вашого Worker-а. Після деплою замініть на свою, наприклад https://lom-sky.ваш-субдомен.workers.dev/api/sky
   const API='https://lom-sky.lom-team.workers.dev/api/sky';
   const POLL_MS=60000;
+  // після натискання «Запалити зірку» сторінка кілька хвилин чекає на донат і питає Worker частіше
+  const WAIT_MS=5*60000, WAIT_POLL_MS=5000;
+  let waitFrom=0;
   // зірки приходять з Worker-а: [ключ, сума, час у Unix-секундах]. Ключ постійний, тож місце зірки на небі не змінюється
   const DONATIONS=[]; const KEYS=[]; const TIMES=[]; const known=new Set();
   function seedOf(key){let h=2166136261;for(let i=0;i<key.length;i++){h^=key.charCodeAt(i);h=Math.imul(h,16777619);}return h|0;}
@@ -180,6 +187,10 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
       c.strokeStyle=g;c.lineWidth=1.6;c.lineCap='round';c.beginPath();c.moveTo(hx,hy);c.lineTo(tx,ty);c.stroke();
       psf(c,hx,hy,0.6,alpha,[235,242,255]);
     }
+    // поки чекаємо на зірку, за лісом ледь помітно пульсує світло
+    if(waitFrom){const pulse=reduce?0.6:0.5+0.5*Math.sin(t*1.6),gx=W/2,gy=horizonY,R=Math.max(W*0.35,H*0.5),g=c.createRadialGradient(gx,gy,0,gx,gy,R);
+      g.addColorStop(0,'rgba(255,232,196,'+(0.05+0.06*pulse)+')');g.addColorStop(0.5,'rgba(255,232,196,'+(0.015+0.02*pulse)+')');g.addColorStop(1,'rgba(255,232,196,0)');
+      c.fillStyle=g;c.fillRect(gx-R,gy-R,R*2,R);}
     c.globalCompositeOperation='source-over';
     c.drawImage(fg,0,0,W,H);
     // підпис суми біля нової зірки: з'являється, повільно піднімається і тане
@@ -205,19 +216,32 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
   function addDonation(v,key,time,animate,delay){
     DONATIONS.push(v);KEYS.push(key);TIMES.push(time||0);known.add(key);const i=sotky++;
     if(!animate)return;
+    if(waitFrom&&(time||0)*1000>=waitFrom-60000)endWait(); // схоже, це та сама зірка, на яку чекали
     const now=performance.now()+(delay||0);
     if(reduce){born[i]=now;labels.push({i,start:now});return;}
     born[i]=null;spawnMeteor(now,i);
   }
   function plz(n){const a=n%10,b=n%100;if(a===1&&b!==11)return 'зірка';if(a>=2&&a<=4&&(b<12||b>14))return 'зірки';return 'зірок';}
   function showCount(){document.getElementById('stars').innerHTML='<b>'+sotky+'</b>'+plz(sotky);}
-  let loaded=false,busy=false;
+  const hint=document.querySelector('.hint'),HINT=hint.textContent;
+  function showWait(){hint.textContent=waitFrom?'Чекаємо на вашу зірку…':HINT;hint.classList.toggle('wait',!!waitFrom);}
+  // момент натискання зберігаємо в localStorage: на телефоні браузер може перезавантажити вкладку, поки людина в Monobank
+  function startWait(){waitFrom=Date.now();try{localStorage.setItem('lom-wait',String(waitFrom));}catch(e){}showWait();}
+  function endWait(){waitFrom=0;try{localStorage.removeItem('lom-wait');}catch(e){}showWait();}
+  function waiting(){if(waitFrom&&Date.now()-waitFrom>WAIT_MS)endWait();return !!waitFrom;}
+  try{const v=+localStorage.getItem('lom-wait');if(v&&Date.now()-v<WAIT_MS)waitFrom=v;}catch(e){}
+  showWait();
+  document.querySelector('.cta').addEventListener('click',startWait);
+
+  let loaded=false,busy=false,lastPoll=0;
   async function poll(){
-    if(busy)return;busy=true;
+    if(busy)return;busy=true;lastPoll=Date.now();
     try{
-      const r=await fetch(API,{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);
+      // ?fresh=1 просить Worker одразу перевірити Monobank, а не чекати свого розкладу
+      const r=await fetch(API+(waiting()?'?fresh=1':''),{cache:'no-store'});if(!r.ok)throw new Error('HTTP '+r.status);
       const data=await r.json();let j=0;
-      for(const [k,a,t] of data.stars||[]){if(known.has(k))continue;addDonation(a,k,t,loaded,(j++)*900);}
+      // після перезавантаження вкладки під час очікування свіжі зірки теж прилітають метеором
+      for(const [k,a,t] of data.stars||[]){if(known.has(k))continue;addDonation(a,k,t,loaded||(waitFrom&&t*1000>=waitFrom-60000),(j++)*900);}
       loaded=true;showCount();
     }catch(e){if(!loaded)document.getElementById('stars').textContent='небо поки недоступне';}
     finally{busy=false;}
@@ -225,7 +249,7 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
   poll();
   // тест: відкрийте сторінку з ?test в адресі й викличте в консолі testStar(500)
   if(/[?&]test\b/.test(location.search))window.testStar=(amount)=>{addDonation(Number(amount)||100,'test-'+Date.now()+'-'+Math.random(),Math.floor(Date.now()/1000),true);showCount();};
-  setInterval(()=>{if(!document.hidden)poll();},POLL_MS);
+  setInterval(()=>{if(!document.hidden&&(waiting()?true:Date.now()-lastPoll>=POLL_MS))poll();},WAIT_POLL_MS);
   // людина повернулась із Monobank: одразу перевіряємо, чи не прилетіла її зірка
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
   resize();
