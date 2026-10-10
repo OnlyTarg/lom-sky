@@ -80,7 +80,10 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
   let sotky=0; const sot=[]; const born={}; const meteors=[]; const labels=[]; const t0=performance.now();
   // підсвічування: наведення (чи дотик) на підписану зірку запалює всі зірки цієї людини, на анонімну — лише її саму
   const hl={i:-1,f:0}; let ptr=null,tap=-1,tapAt=0,lastNow=0,cursorOn=false;
-  const LABEL_MS=5000; // скільки висить підпис «+100 ₴» біля нової зірки
+  const LABEL_MS=6500;  // скільки висить підпис «+100 ₴» біля нової зірки
+  const GLOW_MS=6500;   // скільки нова зірка пульсує теплим сяйвом, щоб людина встигла її помітити
+  const METEOR_MS=2400; // скільки летить метеор до нової зірки
+  const glow={};
 
   function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
   function gauss(r){let u=0,v=0;while(!u)u=r();while(!v)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(6.2832*v);}
@@ -168,7 +171,8 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
 
   function spawnMeteor(now,target){
     const r=Math.random;
-    if(target!==undefined){const ang=-2.35+(r()-0.5)*0.5,len=H*(0.35+r()*0.15);meteors.push({target,start:now,dur:1000,ang,len});return;}
+    // напрямок і довжину польоту обираємо, коли метеор стартує: тоді вже відомо, де зірка на екрані
+    if(target!==undefined){meteors.push({target,start:now,dur:METEOR_MS,ang:null,len:0});return;}
     const x=W*(0.1+r()*0.8),y=H*(0.05+r()*0.4),ang=0.5+r()*1.2+(r()<0.5?0:Math.PI*0.6);
     meteors.push({x,y,ang,dist:H*(0.18+r()*0.25),start:now,dur:600+r()*600,tail:70+r()*120});
   }
@@ -198,19 +202,31 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
       if(born[i]!==undefined){const b=born[i];if(b===null)continue;const k=(now-b)/1600;if(k<0)continue;if(k<1){a=Math.min(1,k*4);s*=1+2.6*Math.pow(1-k,2.2);}else delete born[i];}
       let aa=a*heightDim(y);
       if(hl.f>0){
-        if(i===hl.i||(hlName&&SIGS[i]===hlName)){psf(c,x,y,s,aa,p.col);const pu=reduce?1:0.85+0.15*Math.sin(t*3+i),R=14+6*s;const g=c.createRadialGradient(x,y,0,x,y,R);g.addColorStop(0,'rgba(255,222,160,'+(0.5*hl.f*pu)+')');g.addColorStop(0.35,'rgba(255,214,150,'+(0.16*hl.f*pu)+')');g.addColorStop(1,'rgba(255,214,150,0)');c.fillStyle=g;c.fillRect(x-R,y-R,R*2,R*2);psf(c,x,y,s*1.3,hl.f,[255,236,200]);
+        if(i===hl.i||(hlName&&SIGS[i]===hlName)){psf(c,x,y,s,aa,p.col);halo(c,x,y,s,hl.f*(reduce?1:0.85+0.15*Math.sin(t*3+i)));
           if(s>2){const L=(7+3.2*(s-1))*1.15;c.strokeStyle='rgba(255,255,255,'+(0.1*aa)+')';c.lineWidth=0.6;c.beginPath();c.moveTo(x-L,y);c.lineTo(x+L,y);c.moveTo(x,y-L);c.lineTo(x,y+L);c.stroke();}
           continue;}
         aa*=1-0.5*hl.f;
       }
       psf(c,x,y,s,aa,p.col);
+      // нова зірка кілька секунд пульсує, поступово заспокоюючись
+      if(glow[i]!==undefined){const g=(now-glow[i])/GLOW_MS;if(g>=1)delete glow[i];else if(g>=0){
+        const env=Math.min(1,g/0.06)*(g>0.6?1-(g-0.6)/0.4:1),pu=reduce?0.8:0.55+0.45*Math.cos((now-glow[i])/1000*Math.PI*1.6);halo(c,x,y,s,env*pu);}}
       if(s>2){const L=(7+3.2*(s-1))*1.15;c.strokeStyle='rgba(255,255,255,'+(0.1*aa)+')';c.lineWidth=0.6;c.beginPath();c.moveTo(x-L,y);c.lineTo(x+L,y);c.moveTo(x,y-L);c.lineTo(x,y+L);c.stroke();}
     }
     for(let m=meteors.length-1;m>=0;m--){
-      const o=meteors[m],k=(now-o.start)/o.dur;if(k<0)continue;if(k>=1){if(o.target!==undefined){born[o.target]=now;labels.push({i:o.target,start:now});}meteors.splice(m,1);continue;}
+      const o=meteors[m];let k=(now-o.start)/o.dur;if(k<0)continue;
+      if(o.target!==undefined&&o.ang===null){
+        // зірка ще за краєм екрана: метеор чекає, поки небо її винесе
+        const [ex,ey]=sotPos(o.target,sh);if(ex<24||ex>W-24){o.start=now;continue;}
+        // падає згори з того боку, де більше місця, і не виходить за межі екрана
+        const dir=ex<W/2?1:-1,th=0.5+Math.random()*0.25,cx=Math.cos(th),cy=Math.sin(th);
+        const room=Math.min((dir>0?W-16-ex:ex-16)/cx,(ey-16)/cy);
+        o.len=Math.max(50,Math.min(H*(0.42+Math.random()*0.12),room));o.ang=Math.atan2(cy,-dir*cx);o.start=now;k=0;
+      }
+      if(k>=1){if(o.target!==undefined){born[o.target]=now;glow[o.target]=now;labels.push({i:o.target,start:now});}meteors.splice(m,1);continue;}
       let hx,hy,tx,ty,alpha;
-      if(o.target!==undefined){const [ex,ey]=sotPos(o.target,sh),e=k*k*(3-2*k);const sx=ex-Math.cos(o.ang)*o.len,sy=ey-Math.sin(o.ang)*o.len;
-        hx=sx+(ex-sx)*e;hy=sy+(ey-sy)*e;const tl=o.len*0.38*(1-k*0.5);tx=hx-Math.cos(o.ang)*tl;ty=hy-Math.sin(o.ang)*tl;alpha=0.9;}
+      if(o.target!==undefined){const [ex,ey]=sotPos(o.target,sh),e=0.5-0.5*Math.cos(Math.PI*k);const sx=ex-Math.cos(o.ang)*o.len,sy=ey-Math.sin(o.ang)*o.len;
+        hx=sx+(ex-sx)*e;hy=sy+(ey-sy)*e;const tl=o.len*0.4*(1-k*0.6);tx=hx-Math.cos(o.ang)*tl;ty=hy-Math.sin(o.ang)*tl;alpha=0.9*Math.min(1,k*5);}
       else{const e=k;hx=o.x+Math.cos(o.ang)*o.dist*e;hy=o.y+Math.sin(o.ang)*o.dist*e;const tl=o.tail*Math.min(1,k*3);tx=hx-Math.cos(o.ang)*tl;ty=hy-Math.sin(o.ang)*tl;alpha=Math.sin(Math.PI*k);}
       const g=c.createLinearGradient(hx,hy,tx,ty);g.addColorStop(0,'rgba(255,255,255,'+alpha+')');g.addColorStop(0.3,'rgba(200,220,255,'+(alpha*0.35)+')');g.addColorStop(1,'rgba(200,220,255,0)');
       c.strokeStyle=g;c.lineWidth=1.6;c.lineCap='round';c.beginPath();c.moveTo(hx,hy);c.lineTo(tx,ty);c.stroke();
@@ -231,6 +247,11 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
     }
     // підпис біля зірки під курсором: ім'я, а в анонімної — сума
     if(hl.i>=0&&hl.f>0.01){const [sx,sy]=sotPos(hl.i,sh);label(c,hlName||'+'+DONATIONS[hl.i].toLocaleString('uk-UA')+' ₴',sx,sy,hl.f);}
+  }
+  function halo(c,x,y,s,f){
+    const R=14+6*s,g=c.createRadialGradient(x,y,0,x,y,R);
+    g.addColorStop(0,'rgba(255,222,160,'+(0.5*f)+')');g.addColorStop(0.35,'rgba(255,214,150,'+(0.16*f)+')');g.addColorStop(1,'rgba(255,214,150,0)');
+    c.fillStyle=g;c.fillRect(x-R,y-R,R*2,R*2);psf(c,x,y,s*1.3,f,[255,236,200]);
   }
   function label(c,txt,sx,sy,a){
     c.font='500 15px "Commissioner", system-ui, sans-serif';const tw=c.measureText(txt).width;
@@ -256,7 +277,7 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
     if(!animate)return;
     if(waitFrom&&(time||0)*1000>=waitFrom-60000)endWait(); // схоже, це та сама зірка, на яку чекали
     const now=performance.now()+(delay||0);
-    if(reduce){born[i]=now;labels.push({i,start:now});return;}
+    if(reduce){born[i]=now;glow[i]=now;labels.push({i,start:now});return;}
     born[i]=null;spawnMeteor(now,i);
   }
   function plz(n){const a=n%10,b=n%100;if(a===1&&b!==11)return 'зірка';if(a>=2&&a<=4&&(b<12||b>14))return 'зірки';return 'зірок';}
@@ -280,7 +301,7 @@ h1{font-family:var(--display);font-weight:400;font-size:clamp(20px,3.4vw,30px);m
       const data=await r.json();let j=0;
       // після перезавантаження вкладки під час очікування свіжі зірки теж прилітають метеором
       // підпис може з'явитися й у старої зірки: людина щойно вперше написала «★ Ім'я»
-      for(const [k,a,t,n] of data.stars||[]){if(known.has(k)){SIGS[idx.get(k)]=n||null;continue;}addDonation(a,k,t,loaded||(waitFrom&&t*1000>=waitFrom-60000),(j++)*900,n);}
+      for(const [k,a,t,n] of data.stars||[]){if(known.has(k)){SIGS[idx.get(k)]=n||null;continue;}addDonation(a,k,t,loaded||(waitFrom&&t*1000>=waitFrom-60000),(j++)*1500,n);}
       loaded=true;showCount();
     }catch(e){if(!loaded)document.getElementById('stars').textContent='небо поки недоступне';}
     finally{busy=false;}
